@@ -1,23 +1,27 @@
-﻿using Evix.EventSystems;
+﻿using Evix.Controllers;
+using Evix.EventSystems;
 using Evix.Terrain.Collections;
 using Evix.Terrain.DataGeneration;
 using Evix.Terrain.MeshGeneration;
 using Evix.Terrain.Resolution;
 using UnityEngine;
 
-namespace Evix.Controllers.Unity {
+namespace Evix.Managers {
 
-  public class TestWorldController : MonoBehaviour {
+  /// <summary>
+  /// Manages our test game world
+  /// </summary>
+  public class TestWorldManager : MonoBehaviour {
 
     /// <summary>
     /// The current object to focus on.
     /// </summary>
-    public FocusController currentFocus;
+    public FocusManager currentFocus;
 
     /// <summary>
     /// The controller for the active level.
     /// </summary>
-    public LevelManager levelController;
+    public LevelManager levelManager;
 
 
     ///// SETUP VARS
@@ -42,9 +46,9 @@ namespace Evix.Controllers.Unity {
       Level storage = new Level((1, 1, 1), null);
       Chunk.ID chunkID = new Chunk.ID(0, 0, 0);
       World.setActiveLevel(storage);
-      levelController.initializeFor(World.Current.activeLevel);
+      levelManager.initializeFor(World.Current.activeLevel);
       World.EventSystem.subscribe(
-        levelController,
+        levelManager,
         WorldEventSystem.Channels.ChunkActivationUpdates
       );
 
@@ -132,10 +136,10 @@ namespace Evix.Controllers.Unity {
 
       // set up the level controller
       World.EventSystem.subscribe(
-        levelController,
+        levelManager,
         WorldEventSystem.Channels.ChunkActivationUpdates
       );
-      levelController.initializeFor(level);
+      levelManager.initializeFor(level);
     }
   }
 }

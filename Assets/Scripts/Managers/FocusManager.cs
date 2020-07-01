@@ -3,12 +3,12 @@ using Evix.Terrain.Collections;
 using Evix.Terrain.Resolution;
 using UnityEngine;
 
-namespace Evix.Controllers {
+namespace Evix.Managers {
 
   /// <summary>
-  /// A player controller for use in unity
+  /// Used to track and manage a focus's position in the game world
   /// </summary>
-  public class FocusController : MonoBehaviour, ILevelFocus {
+  public class FocusManager : MonoBehaviour, ILevelFocus {
 
     /// <summary>
     /// If this player is active
@@ -64,7 +64,9 @@ namespace Evix.Controllers {
     }
 
 #if DEBUG
-
+    /// <summary>
+    /// Draw the managed apetures around this focus
+    /// </summary>
     void OnDrawGizmos() {
       // ignore gizmo if inactive
       if (!isActive) {
@@ -84,7 +86,7 @@ namespace Evix.Controllers {
       Gizmos.color = Color.green;
       Gizmos.DrawWireCube(worldChunkLocation, new Vector3(
         activeAperture.managedChunkRadius * 2,
-        activeAperture.managedChunkHeightRadius * 2,
+        Mathf.Min(activeAperture.managedChunkHeightRadius * 2, level.chunkBounds.y),
         activeAperture.managedChunkRadius * 2
       ) * Chunk.Diameter);
 
@@ -93,7 +95,7 @@ namespace Evix.Controllers {
       Gizmos.color = Color.blue;
       Gizmos.DrawWireCube(worldChunkLocation, new Vector3(
         meshAperture.managedChunkRadius * 2,
-        meshAperture.managedChunkHeightRadius * 2,
+        Mathf.Min(meshAperture.managedChunkHeightRadius * 2, level.chunkBounds.y),
         meshAperture.managedChunkRadius * 2
       ) * Chunk.Diameter);
 
@@ -102,25 +104,9 @@ namespace Evix.Controllers {
       Gizmos.color = Color.yellow;
       Gizmos.DrawWireCube(worldChunkLocation, new Vector3(
         loadedAperture.managedChunkRadius * 2,
-        loadedAperture.managedChunkHeightRadius * 2,
+        Mathf.Min(loadedAperture.managedChunkHeightRadius * 2, level.chunkBounds.y),
         loadedAperture.managedChunkRadius * 2
       ) * Chunk.Diameter);
-
-      // draw all the chunks in the loading queue right now
-      /*foreach ((Chunk.ID chunk, Level.AperturePriority priority) in level.getProcessingChunksByApeturePriority()) {
-        if (priority == Level.AperturePriority.Meshed) {
-          Gizmos.color = Color.blue;
-        } else if (priority == Level.AperturePriority.Loaded) {
-          Gizmos.color = Color.yellow;
-        } else {
-          Gizmos.color = Color.white;
-        }
-
-        Gizmos.DrawWireCube(
-          ((chunk.Coordinate * Chunk.Diameter) + (Chunk.Diameter / 2)).vec3,
-          new Vector3(Chunk.Diameter, Chunk.Diameter, Chunk.Diameter)
-        );
-      }*/
     }
 #endif
 

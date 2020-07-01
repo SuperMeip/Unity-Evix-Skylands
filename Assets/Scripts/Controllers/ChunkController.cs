@@ -1,18 +1,22 @@
-﻿using Evix.Terrain.Collections;
+﻿using Evix.Managers;
+using Evix.Terrain.Collections;
 using Unity.Jobs;
 using UnityEngine;
 
 namespace Evix.Controllers {
 
+  /// <summary>
+  /// Controls a chunk in world
+  /// </summary>
   [RequireComponent(typeof(MeshRenderer))]
   [RequireComponent(typeof(MeshFilter))]
   [RequireComponent(typeof(MeshCollider))]
   public class ChunkController : MonoBehaviour {
 
     /// <summary>
-    /// The controller for the active level.
+    /// The Manager for the active level.
     /// </summary>
-    [HideInInspector] public LevelManager levelController;
+    [HideInInspector] public LevelManager levelManager;
 
     /// <summary>
     /// The current chunk location of the chunk this gameobject is representing.

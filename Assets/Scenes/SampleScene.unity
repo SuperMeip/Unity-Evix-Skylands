@@ -195,7 +195,7 @@ Light:
   m_BounceIntensity: 1
   m_ColorTemperature: 6570
   m_UseColorTemperature: 0
-  m_BoundingSphereOverride: {x: 0, y: 1.5874e-41, z: 0, w: 0}
+  m_BoundingSphereOverride: {x: 0, y: 2.3509887e-38, z: 2.7107536e-20, w: 7.737127e+25}
   m_UseBoundingSphereOverride: 0
   m_ShadowRadius: 0
   m_ShadowAngle: 0
@@ -224,7 +224,7 @@ GameObject:
   - component: {fileID: 740613276}
   - component: {fileID: 740613275}
   m_Layer: 0
-  m_Name: World Controller
+  m_Name: World Manager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -243,7 +243,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   currentFocus: {fileID: 2009365472}
-  levelController: {fileID: 1380843393}
+  levelManager: {fileID: 1380843393}
   SeaLevel: 30
   levelSize: {x: 1000, y: 2, z: 1000}
   activeChunkRadius: 4
@@ -361,7 +361,7 @@ GameObject:
   - component: {fileID: 1380843394}
   - component: {fileID: 1380843393}
   m_Layer: 0
-  m_Name: Level Controller
+  m_Name: Level Manager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

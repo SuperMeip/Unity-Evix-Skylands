@@ -1,4 +1,5 @@
-﻿using Evix.Events;
+﻿using Evix.Controllers;
+using Evix.Events;
 using Evix.Terrain.Collections;
 using Evix.Terrain.Resolution;
 using System;
@@ -7,8 +8,12 @@ using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
 
-namespace Evix.Controllers {
+namespace Evix.Managers {
 
+  /// <summary>
+  /// A manager manages data on the backend.
+  /// This manager manages level data and the generation of the level based on it's foci
+  /// </summary>
   public class LevelManager : MonoBehaviour, IObserver {
 
     /// <summary>
@@ -121,7 +126,7 @@ namespace Evix.Controllers {
             World.Debugger.logError($"No chunk controller on {chunkObject.name}");
           } else {
             chunkControllerPool[index] = chunkController;
-            chunkController.levelController = this;
+            chunkController.levelManager = this;
             chunkObject.SetActive(false);
           }
         }
