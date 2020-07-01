@@ -1,4 +1,5 @@
 ﻿using Evix.Terrain.Collections;
+using System;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
@@ -41,18 +42,18 @@ namespace Evix.Terrain.DataGeneration {
     /// <param name="level"></param>
     /// <returns></returns>
     public static bool ChunkFileExists(Chunk.ID chunkID, Level level) {
-      return File.Exists(GetChunkVoxelDataFileName(chunkID, level.name));
+      return File.Exists(GetChunkDataFileName(chunkID, level.name));
     }
 
     /// <summary>
     /// Get the voxeldata for a chunk location from file
     /// </summary>
     /// <returns>False if the chunk is empty</returns>
-    static bool GetVoxelDataForChunkFromFile(Chunk.ID chunkId, string levelName, out NativeArray<byte> voxelData) {
-      voxelData = default;
+    static bool GetDataForChunkFromFile(Chunk.ID chunkId, string levelName, out ChunkSaveData chunkData) {
+      chunkData = default;
       IFormatter formatter = new BinaryFormatter();
       Stream readStream = new FileStream(
-        GetChunkVoxelDataFileName(chunkId, levelName),
+        GetChunkDataFileName(chunkId, levelName),
         FileMode.Open,
         FileAccess.Read,
         FileShare.Read
@@ -60,13 +61,27 @@ namespace Evix.Terrain.DataGeneration {
         Position = 0
       };
       var fileData = formatter.Deserialize(readStream);
-      if (fileData is NativeArray<byte>) {
-        voxelData = (NativeArray<byte>)fileData;
+      if (fileData is ChunkSaveData) {
+        chunkData = (ChunkSaveData)fileData;
         readStream.Close();
         return true;
       }
 
+      readStream.Close();
       return false;
+    }
+
+    /// <summary>
+    /// Only to be used by jobs
+    /// Save a chunk to file
+    /// </summary>
+    /// <param name="chunkLocation"></param>
+    static public void SaveChunkDataToFile(Chunk.ID chunkId, string levelName, NativeArray<byte> voxelsToSave, int solidVoxelCount) {
+      IFormatter formatter = new BinaryFormatter();
+      CheckForSaveDirectory(levelName);
+      Stream stream = new FileStream(GetChunkDataFileName(chunkId, levelName), FileMode.Create, FileAccess.Write, FileShare.None);
+      formatter.Serialize(stream, new ChunkSaveData(voxelsToSave, solidVoxelCount));
+      stream.Close();
     }
 
     /// <summary>
@@ -74,7 +89,7 @@ namespace Evix.Terrain.DataGeneration {
     /// </summary>
     /// <param name="chunkLocation">the location of the chunk</param>
     /// <returns></returns>
-    static string GetChunkVoxelDataFileName(Chunk.ID chunk, string levelName) {
+    static string GetChunkDataFileName(Chunk.ID chunk, string levelName) {
       return $"{GetChunkDataFolder(levelName)}{chunk.Coordinate}.evxch";
     }
 
@@ -106,6 +121,66 @@ namespace Evix.Terrain.DataGeneration {
       }
 
       Directory.CreateDirectory(GetChunkDataFolder(levelName));
+    }
+
+    /// <summary>
+    /// A serializable bit of chunk data
+    /// </summary>
+    [Serializable]
+    public struct ChunkSaveData : ISerializable {
+      /// <summary>
+      /// The voxels to save
+      /// </summary>
+      byte[] voxels;
+
+      /// <summary>
+      /// the solid voxel count
+      /// </summary>
+      int solidVoxelCount;
+
+      /// <summary>
+      /// Make a new set of save data from a job
+      /// </summary>
+      /// <param name="voxels"></param>
+      /// <param name="solidVoxelCount"></param>
+      public ChunkSaveData(NativeArray<byte> voxels, int solidVoxelCount) {
+        this.voxels = solidVoxelCount == 0 ? null : voxels.ToArray();
+        this.solidVoxelCount = solidVoxelCount;
+      }
+
+      /// <summary>
+      /// deserialize
+      /// </summary>
+      /// <param name="info"></param>
+      /// <param name="context"></param>
+      public ChunkSaveData(SerializationInfo info, StreamingContext context) {
+        voxels = (byte[])info.GetValue("voxels", typeof(byte[]));
+        solidVoxelCount = (int)info.GetValue("voxelCount", typeof(int));
+      }
+
+      /// <summary>
+      /// serizalize
+      /// </summary>
+      /// <param name="info"></param>
+      /// <param name="context"></param>
+      public void GetObjectData(SerializationInfo info, StreamingContext context) {
+        info.AddValue("voxels", voxels, typeof(byte[]));
+        info.AddValue("voxelCount", solidVoxelCount, typeof(int));
+      }
+
+      /// <summary>
+      /// Get the voxels and the count
+      /// </summary>
+      /// <param name="voxels"></param>
+      /// <returns></returns>
+      public int tryGetVoxels(out NativeArray<byte> voxels) {
+        voxels = new NativeArray<byte>(Chunk.Diameter * Chunk.Diameter * Chunk.Diameter, Allocator.Temp);
+        if (solidVoxelCount != 0) {
+          voxels.CopyFrom(this.voxels);
+        }
+
+        return solidVoxelCount;
+      }
     }
 
     /// <summary>
@@ -144,9 +219,54 @@ namespace Evix.Terrain.DataGeneration {
       /// Load the chunk data from file
       /// </summary>
       public void Execute() {
-        if (GetVoxelDataForChunkFromFile(chunkID, levelName, out outVoxels)) {
-          solidVoxelCount[0] = 1;
+        if (GetDataForChunkFromFile(chunkID, levelName, out ChunkSaveData chunkData)) {
+          int solidVoxels = chunkData.tryGetVoxels(out NativeArray<byte> voxels);
+          if (solidVoxels != 0) {
+            outVoxels = voxels;
+            solidVoxelCount[0] = solidVoxels;
+          }
         }
+      }
+    }
+
+    /// <summary>
+    /// Job for loading chunk voxel data from a file
+    /// </summary>
+    public struct SaveChunkDataToFileJob : IJob {
+
+      /// <summary>
+      /// the chunk ID we're getting data for.
+      /// </summary>
+      public readonly Chunk.ID chunkID;
+
+      /// <summary>
+      /// The voxel data retreived from file
+      /// </summary>
+      [DeallocateOnJobCompletion]
+      readonly NativeArray<byte> saveVoxels;
+
+      /// <summary>
+      /// If the loaded chunk ended up being empty
+      /// </summary>
+      public int solidVoxelCount;
+
+      /// <summary>
+      /// The level name, used for finding the file
+      /// </summary>
+      string levelName;
+
+      public SaveChunkDataToFileJob(Chunk.ID chunkID, string levelName, NativeArray<byte> inputVoxels, int solidVoxelCount) {
+        this.chunkID = chunkID;
+        this.levelName = levelName;
+        this.solidVoxelCount = solidVoxelCount;
+        saveVoxels = inputVoxels;
+      }
+
+      /// <summary>
+      /// Load the chunk data from file
+      /// </summary>
+      public void Execute() {
+        SaveChunkDataToFile(chunkID, levelName, saveVoxels, solidVoxelCount);
       }
     }
   }

@@ -16,15 +16,22 @@ namespace Evix.Terrain.Resolution {
     /// <param name="managedChunkRadius"></param>
     /// <param name="managedChunkHeight"></param>
     internal ActiveChunkObjectAperture(int managedChunkRadius, int managedChunkHeight = 0)
-    : base(managedChunkRadius, managedChunkHeight) { }
+    : base(managedChunkRadius, true, managedChunkHeight) { }
 
     /// <summary>
     /// Schedule the activate chunk job
     /// </summary>
     /// <param name="chunkID"></param>
     /// <returns></returns>
-    public override ApertureJobHandle getJobFor(Chunk.ID chunkID) {
-      ActivateChunkObjectJob job = new ActivateChunkObjectJob(chunkID);
+    public override ApertureJobHandle getJobFor(Chunk.ID chunkID, FocusAdjustmentType adjustmentType) {
+      IJob job;
+      if (adjustmentType == FocusAdjustmentType.InFocus) {
+        job = new ActivateChunkObjectJob(chunkID);
+      } else {
+        job = new DeactivateChunkObjectJob(chunkID);
+      }
+
+
       return new ApertureJobHandle(job, this);
     }
 
@@ -47,8 +54,8 @@ namespace Evix.Terrain.Resolution {
     internal override bool validateChunk(Chunk.ID chunkID, out Chunk chunk) {
       // if this is valid for meshing
       // and if the chunk is meshed and isn't empty, or just isn't meshed, it's valid for the queue.
-      return level.getApetureByPriority(Level.AperturePriority.Meshed).validateChunk(chunkID, out chunk) 
-        && !(chunk.meshIsGenerated && chunk.meshIsEmpty);
+      return level.getApetureByPriority(Level.AperturePriority.Meshed).validateChunk(chunkID, out chunk)
+        && !(chunk != null && chunk.meshIsGenerated && chunk.meshIsEmpty);
     }
 
     /// <summary>
@@ -102,6 +109,55 @@ namespace Evix.Terrain.Resolution {
       }
 
       public SetChunkActiveEvent(Chunk.ID chunkID) {
+        this.chunkID = chunkID;
+        name = $"Setting chunk active: {chunkID.Coordinate}";
+      }
+    }
+    
+    /// <summary>
+    /// A job for notifying the main thread to set the chunk object inactive
+    /// </summary>
+    public struct DeactivateChunkObjectJob : IJob {
+      /// <summary>
+      /// The chunk id we're updating to active
+      /// </summary>
+      Chunk.ID chunkID;
+
+      public DeactivateChunkObjectJob(Chunk.ID chunkID) {
+        this.chunkID = chunkID;
+      }
+
+      /// <summary>
+      /// notify the chunk activaton channel that we want this chunk active
+      /// </summary>
+      public void Execute() {
+        World.EventSystem.notifyChannelOf(
+          new SetChunkInactiveEvent(chunkID),
+          EventSystems.WorldEventSystem.Channels.ChunkActivationUpdates
+        );
+      }
+    }
+
+    /// <summary>
+    /// An event to notify the level controller to set a chunk inactive
+    /// </summary>
+    public struct SetChunkInactiveEvent : IEvent {
+
+      /// <summary>
+      /// The name of the event
+      /// </summary>
+      public string name {
+        get;
+      }
+
+      /// <summary>
+      /// The chunk id to set active
+      /// </summary>
+      public Chunk.ID chunkID {
+        get;
+      }
+
+      public SetChunkInactiveEvent(Chunk.ID chunkID) {
         this.chunkID = chunkID;
         name = $"Setting chunk active: {chunkID.Coordinate}";
       }

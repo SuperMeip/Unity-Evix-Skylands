@@ -1,4 +1,5 @@
-﻿using Evix.Voxels;
+﻿using Evix.Terrain.DataGeneration;
+using Evix.Voxels;
 using System;
 using System.Linq;
 using Unity.Collections;
@@ -103,6 +104,14 @@ namespace Evix.Terrain.Collections {
         ? voxels.Count(value => value != Voxel.Types.Empty.Id)
         : (int)solidVoxelCount;
       isLoaded = true;
+    }
+
+    /// <summary>
+    /// Get all the voxels as a native array
+    /// </summary>
+    /// <returns></returns>
+    public NativeArray<byte> getVoxels() {
+      return new NativeArray<byte>(voxels, Allocator.Persistent); 
     }
 
     public override string ToString() {

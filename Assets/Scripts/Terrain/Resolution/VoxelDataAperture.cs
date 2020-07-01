@@ -1,5 +1,6 @@
 ﻿using Evix.Terrain.Collections;
 using Evix.Terrain.DataGeneration;
+using Unity.Jobs;
 
 namespace Evix.Terrain.Resolution {
 
@@ -14,7 +15,7 @@ namespace Evix.Terrain.Resolution {
     /// <param name="managedChunkRadius"></param>
     /// <param name="managedChunkHeight"></param>
     internal VoxelDataAperture(int managedChunkRadius, int managedChunkHeight = 0)
-    : base(managedChunkRadius, managedChunkHeight) {
+    : base(managedChunkRadius, true, managedChunkHeight) {
       yWeightMultiplier = 1.5f;
     }
 
@@ -23,15 +24,23 @@ namespace Evix.Terrain.Resolution {
     /// </summary>
     /// <param name="chunkID"></param>
     /// <returns></returns>
-    public override ApertureJobHandle getJobFor(Chunk.ID chunkID) {
-      if (LevelDAO.ChunkFileExists(chunkID, level)) {
-        LevelDAO.LoadChunkDataFromFileJob fileJob = new LevelDAO.LoadChunkDataFromFileJob(chunkID, level.name);
-        return new ApertureJobHandle(fileJob, this);
-      }
+    public override ApertureJobHandle getJobFor(Chunk.ID chunkID, FocusAdjustmentType adjustmentType) {
+      IJob job;
+      if (adjustmentType == FocusAdjustmentType.InFocus) {
+        if (LevelDAO.ChunkFileExists(chunkID, level)) {
+          job = new LevelDAO.LoadChunkDataFromFileJob(chunkID, level.name);
+          // if there's no file, we need to generate the chunk data from scratch
+        } else {
+          job = BiomeMap.GetTerrainGenerationJob(chunkID, level);
+        }
+      /// if it's out of focus, we want to save the chunk to file
+      } else if (level.chunks.TryGetValue(chunkID, out Chunk chunkToSave)) {
+        job = new LevelDAO.SaveChunkDataToFileJob(chunkID, level.name, chunkToSave.getVoxels(), chunkToSave.solidVoxelCount);
+      } else throw new System.MissingMemberException(
+        $"VoxelDataAperture is trying to save chunk data for {chunkID} but could not find the chunk data in the level"
+      );
 
-      // if there's no file, we need to generate the chunk data from scratch
-      BiomeMap.GenerateChunkDataFromSourceJob terrainGenJob = BiomeMap.GetTerrainGenerationJob(chunkID, level);
-      return new ApertureJobHandle(terrainGenJob, this);
+      return new ApertureJobHandle(job, this);
     }
 
     /// <summary>
@@ -52,7 +61,7 @@ namespace Evix.Terrain.Resolution {
     protected override void handleFinishedJob(Chunk.ID chunkID, ref ApertureJobHandle finishedJobHandle) {
       Chunk newlyLoadedChunk = new Chunk();
       switch (finishedJobHandle.job) {
-        // same for both, but they're structs so can't inherit.
+        /// same for both, but they're structs so can't inherit.
         case LevelDAO.LoadChunkDataFromFileJob lcdffj:
           // if we didn't generate an empty chunk, copy the voxels over.
           if (lcdffj.solidVoxelCount[0] > 0) {
@@ -74,6 +83,10 @@ namespace Evix.Terrain.Resolution {
           }
           gcdfsj.outVoxels.Dispose(finishedJobHandle.jobHandle);
           gcdfsj.solidVoxelCount.Dispose(finishedJobHandle.jobHandle);
+          break;
+        /// once the chunk data is saved, remove it from the level
+        case LevelDAO.SaveChunkDataToFileJob scdtfj:
+          level.chunks.Remove(scdtfj.chunkID);
           break;
         default:
           return;

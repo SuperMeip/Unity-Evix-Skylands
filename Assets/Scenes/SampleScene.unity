@@ -245,7 +245,7 @@ MonoBehaviour:
   currentFocus: {fileID: 2009365472}
   levelManager: {fileID: 1380843393}
   SeaLevel: 30
-  levelSize: {x: 1000, y: 2, z: 1000}
+  levelSize: {x: 1000, y: 20, z: 1000}
   activeChunkRadius: 4
   activeChunkHeightOverride: 0
   meshedChunkBuffer: 2

@@ -59,9 +59,7 @@ namespace Evix.Terrain.MeshGeneration {
     /// <param name="level"></param>
     /// <returns></returns>
     public static MarchingTetsMeshGenJob GetJob(byte[] voxelsToMarchOver) {
-      NativeArray<byte> inputVoxels = new NativeArray<byte>(MarchDiameter * MarchDiameter * MarchDiameter, Allocator.Persistent);
-      inputVoxels.CopyFrom(voxelsToMarchOver);
-      return new MarchingTetsMeshGenJob(inputVoxels);
+      return new MarchingTetsMeshGenJob(voxelsToMarchOver);
     }
 
     /// <summary>
@@ -123,6 +121,39 @@ namespace Evix.Terrain.MeshGeneration {
       }
 
       return true;
+    }
+
+    /// <summary>
+    /// Get if the nessisary neighbors of the current chunk have been loaded in the given level
+    /// We should check all NeighborOffsetsThatNeedThisChunkLoaded to see if there's a single chunk that's loaded with data.
+    /// If there's no loaded chunk neighbors that have any blocks, we can drop this chunk
+    /// </summary>
+    /// <param name="chunkID"></param>
+    /// <returns></returns>
+    public static bool IsANessisaryChunkNeighbor(Chunk.ID chunkID, Level level) {
+      foreach (Coordinate neighborOffset in NecessaryLoadedChunkNeighborOffsets) {
+        Chunk.ID neighborKey = chunkID.Coordinate + neighborOffset;
+        // if the neighbor is within the chunk radius we need to check it, if not, it can be considered empty
+        if (neighborKey.Coordinate.isWithin(Coordinate.Zero, level.chunkBounds)) {
+          // if we find the chunk and it's empty we need to check if it's empty and loaded.
+          if (level.chunks.TryGetValue(neighborKey, out Chunk neighbor)) {
+            if (neighbor.isLoaded) {
+              // if the neighbor is loaded and isn't empty, we need this chunk to be meshed.
+              if (!neighbor.isEmpty) {
+                return true;
+              }
+            // if the neighboring chunk isn't loaded yet, we can't say for sure that this chunk isn't needed.
+            } else {
+              return true;
+            }
+          // if the neighboring chunk isn't loaded yet, we can't say for sure that this chunk isn't needed.
+          } else {
+            return true;
+          }
+        }
+      }
+
+      return false;
     }
 
     /// <summary>
@@ -292,9 +323,10 @@ namespace Evix.Terrain.MeshGeneration {
       /// <summary>
       /// Make a new mesh gen job
       /// </summary>
-      /// <param name="inputVoxels"></param>
-      internal MarchingTetsMeshGenJob(NativeArray<byte> inputVoxels) {
-        inVoxels = inputVoxels;
+      /// <param name="voxelsToMarchOver"></param>
+      internal MarchingTetsMeshGenJob(byte[] voxelsToMarchOver) {
+        inVoxels = new NativeArray<byte>(MarchDiameter * MarchDiameter * MarchDiameter, Allocator.Persistent);
+        inVoxels.CopyFrom(voxelsToMarchOver);
         outVerticies = new NativeList<Vector3>(3000, Allocator.Persistent);
         outTriangles = new NativeList<int>(3000, Allocator.Persistent);
         outColors = new NativeList<Color>(3000, Allocator.Persistent);

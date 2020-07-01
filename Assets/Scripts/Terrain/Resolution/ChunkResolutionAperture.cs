@@ -12,6 +12,17 @@ namespace Evix.Terrain.Resolution {
   public abstract class ChunkResolutionAperture {
 
     /// <summary>
+    /// How a chunk has changed in relation to this apeture when a focus moves.
+    /// Has the chunk moved in focus, or out of focus?
+    /// </summary>
+    public enum FocusAdjustmentType { InFocus, OutOfFocus};
+
+    /// <summary>
+    /// If this type of apeture has out of focus logic. Defaults to false.
+    /// </summary>
+    readonly bool HasOutOfFocusLogic;
+
+    /// <summary>
     /// The managed chunk area radius, X and Z. Height may be different.
     /// </summary>
     public int managedChunkRadius {
@@ -61,8 +72,9 @@ namespace Evix.Terrain.Resolution {
     /// <param name="level"></param>
     /// <param name="managedChunkRadius"></param>
     /// <param name="managedChunkHeight"></param>
-    protected ChunkResolutionAperture(int managedChunkRadius, int managedChunkHeight = 0) {
+    protected ChunkResolutionAperture(int managedChunkRadius, bool hasOutOfFocusLogic = false, int managedChunkHeight = 0) {
       this.managedChunkRadius = managedChunkRadius;
+      HasOutOfFocusLogic = hasOutOfFocusLogic;
       managedChunkHeightRadius = managedChunkHeight == 0 ? managedChunkRadius : managedChunkHeight;
       managedChunkBoundsByFocusID = new Dictionary<int, Coordinate[]>();
     }
@@ -73,40 +85,57 @@ namespace Evix.Terrain.Resolution {
     /// Create and schedule the child job for this chunk using a unity IJob
     /// </summary>
     /// <param name="chunkID"></param>
-    public abstract ApertureJobHandle getJobFor(Chunk.ID chunkID);
+    public abstract ApertureJobHandle getJobFor(Chunk.ID chunkID, FocusAdjustmentType adjustmentType);
 
     /// <summary>
     /// Get the chunks for a new focus point being initilized
     /// </summary>
     /// <param name="newFocalPoint"></param>
-    public Coordinate[] getChunkLocationsForFocusInitilization(ILevelFocus newFocalPoint) {
+    public List<ApetureChunkAdjustment> getAdjustmentsForFocusInitilization(ILevelFocus newFocalPoint) {
       int focusID = level.getFocusID(newFocalPoint);
       if (focusID < 0) {
         throw new System.ArgumentOutOfRangeException("focusID", $"Aperture; {GetType()}, tried to load a new focus of type {newFocalPoint.GetType()} that isn't registered to it's level");
       }
 
+      List<ApetureChunkAdjustment> chunkAdjustments = new List<ApetureChunkAdjustment>();
       Coordinate[] managedChunkBounds = getManagedChunkBounds(newFocalPoint);
       managedChunkBoundsByFocusID[focusID] = managedChunkBounds;
 
-      Coordinate[] chunkLocationsToLoad = Coordinate.GetAllPointsBetween(managedChunkBounds[0], managedChunkBounds[1]);
-      return chunkLocationsToLoad;
+      /// just get the new in focus chunks for the whole managed area
+      managedChunkBounds[0].until(managedChunkBounds[1], inFocusChunkLocation => {
+        chunkAdjustments.Add(new ApetureChunkAdjustment(inFocusChunkLocation));
+      });
+
+      return chunkAdjustments;
     }
 
     /// <summary>
     /// Adjust the bounds and resolution loading for the given focus.
     /// </summary>
     /// <param name="focus"></param>
-    public Coordinate[] getChunkLocationsForFocusAdjustment(ILevelFocus focus) {
+    public List<ApetureChunkAdjustment> getAdjustmentsForFocusLocationChange(ILevelFocus focus) {
       int focusID = level.getFocusID(focus);
       if (focusID < 0) {
         throw new System.ArgumentOutOfRangeException("focusID", $"Aperture; {GetType()}, tried to load a new focus of type {focus.GetType()} that isn't registered to it's level");
       }
 
+      List<ApetureChunkAdjustment> chunkAdjustments = new List<ApetureChunkAdjustment>();
       Coordinate[] newManagedChunkBounds = getManagedChunkBounds(focus);
-      Coordinate[] newChunksToLoad = Coordinate.GetPointDiff(newManagedChunkBounds, managedChunkBoundsByFocusID[focusID]);
-      managedChunkBoundsByFocusID[focusID] = newManagedChunkBounds;
 
-      return newChunksToLoad;
+      /// get newly in focus chunks
+      newManagedChunkBounds.forEachPointNotWithin(managedChunkBoundsByFocusID[focusID], inFocusChunkLocation => {
+        chunkAdjustments.Add(new ApetureChunkAdjustment(inFocusChunkLocation));
+      });
+
+      /// see if we should get newly out of focus chunks
+      if (HasOutOfFocusLogic) {
+        managedChunkBoundsByFocusID[focusID].forEachPointNotWithin(newManagedChunkBounds, inFocusChunkLocation => {
+          chunkAdjustments.Add(new ApetureChunkAdjustment(inFocusChunkLocation, FocusAdjustmentType.OutOfFocus));
+        });
+      }
+
+      managedChunkBoundsByFocusID[focusID] = newManagedChunkBounds;
+      return chunkAdjustments;
     }
 
     /// <summary>
@@ -114,12 +143,15 @@ namespace Evix.Terrain.Resolution {
     /// </summary>
     /// <param name="chunkID"></param>
     /// <returns></returns>
-    public bool chunkIsValid(Chunk.ID chunkID) {
-      if (!isWithinManagedBounds(chunkID.Coordinate)) {
+    public bool chunkIsValid(ApetureChunkAdjustment adjustment) {
+      bool chunkIsInFocusBounds = isWithinManagedBounds(adjustment.chunkID.Coordinate);
+      if ((!chunkIsInFocusBounds && adjustment.type == FocusAdjustmentType.InFocus)
+        || (chunkIsInFocusBounds && adjustment.type == FocusAdjustmentType.OutOfFocus)
+      ) {
         return false;
       }
 
-      return validateChunk(chunkID, out _);
+      return validateChunk(adjustment.chunkID, out _);
     }
 
     /// <summary>
@@ -212,10 +244,44 @@ namespace Evix.Terrain.Resolution {
         ),
         (
           Math.Min(focusLocation.x + managedChunkRadius, level.chunkBounds.x),
-          Math.Min(focusLocation.x + managedChunkHeightRadius, level.chunkBounds.y),
+          Math.Min(focusLocation.y + managedChunkHeightRadius, level.chunkBounds.y),
           Math.Min(focusLocation.z + managedChunkRadius, level.chunkBounds.z)
         )
       };
+    }
+
+    /// <summary>
+    /// A struct representing an adjustment to a chunk in relation to an apeture
+    /// Used to say if chunk XYZ has moved in or out of focus
+    /// </summary>
+    public struct ApetureChunkAdjustment {
+
+      /// <summary>
+      /// The chunk being adjusted
+      /// </summary>
+      readonly public Chunk.ID chunkID;
+      /// <summary>
+      /// The type of adjustment
+      /// </summary>
+      readonly public FocusAdjustmentType type;
+
+      /// <summary>
+      /// Make a new adjustment
+      /// </summary>
+      /// <param name="chunkID"></param>
+      /// <param name="adjustmentType"></param>
+      public ApetureChunkAdjustment(Chunk.ID chunkID, FocusAdjustmentType adjustmentType = FocusAdjustmentType.InFocus) {
+        this.chunkID = chunkID;
+        type = adjustmentType;
+      }
+
+      /// <summary>
+      /// string override
+      /// </summary>
+      /// <returns></returns>
+      public override string ToString() {
+        return $"{chunkID} is now {type}";
+      }
     }
 
     /// <summary>

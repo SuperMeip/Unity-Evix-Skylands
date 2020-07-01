@@ -2,6 +2,7 @@
 using Evix.Terrain.MeshGeneration;
 using Evix.Events;
 using System.Collections.Generic;
+using Unity.Jobs;
 
 namespace Evix.Terrain.Resolution {
 
@@ -22,21 +23,30 @@ namespace Evix.Terrain.Resolution {
     /// <param name="managedChunkRadius"></param>
     /// <param name="managedChunkHeight"></param>
     internal MeshGenerationAperture(int managedChunkRadius, int managedChunkHeight = 0)
-    : base(managedChunkRadius, managedChunkHeight) {}
+    : base(managedChunkRadius, true, managedChunkHeight) {}
 
     /// <summary>
     /// Schedule a mesh job. Can only be called from the main thread!
     /// </summary>
     /// <param name="chunkID"></param>
     /// <returns></returns>
-    public override ApertureJobHandle getJobFor(Chunk.ID chunkID) {
-      if (preparedVoxelData.TryGetValue(chunkID, out byte[] marchVoxelData)) {
-        MarchingTetsMeshGenerator.MarchingTetsMeshGenJob job = MarchingTetsMeshGenerator.GetJob(marchVoxelData);
-        preparedVoxelData.Remove(chunkID);
-        return new ApertureJobHandle(job, this);
-      } else throw new System.MissingMemberException(
-        $"The MeshGenerationAperture does not have any march voxel data prepared for {chunkID} to create a new MarchingTetsMeshGenJob"
-      );
+    public override ApertureJobHandle getJobFor(Chunk.ID chunkID, FocusAdjustmentType adjustmentType) {
+      IJob job;
+      /// if it's an in focus job
+      if (adjustmentType == FocusAdjustmentType.InFocus) {
+        // get the prep'd data and send it to the job
+        if (preparedVoxelData.TryGetValue(chunkID, out byte[] marchVoxelData)) {
+          job = MarchingTetsMeshGenerator.GetJob(marchVoxelData);
+          preparedVoxelData.Remove(chunkID);
+        } else throw new System.MissingMemberException(
+          $"The MeshGenerationAperture does not have any march voxel data prepared for {chunkID} to create a new MarchingTetsMeshGenJob"
+        );
+      /// if it's an out of focus job
+      } else {
+        job = new DemeshChunkObjectJob(chunkID);
+      }
+
+      return new ApertureJobHandle(job, this);
     }
 
     /// <summary>
@@ -46,7 +56,7 @@ namespace Evix.Terrain.Resolution {
     /// <returns></returns>
     public override bool chunkIsReady(Chunk.ID chunkID) {
       if (level.chunks.TryGetValue(chunkID, out Chunk chunk)) {
-        if (!chunk.isEmpty && chunk.isLoaded) {
+        if (chunk.isLoaded && (!chunk.isEmpty || MarchingTetsMeshGenerator.IsANessisaryChunkNeighbor(chunkID, level))) {
           if (chunk.isSolid) {
             (bool necessaryNeighborsAreLoaded, bool blockingNeighborsAreSolid) = MarchingTetsMeshGenerator.GetRequiredChunkNeighborStats(chunkID, level);
             // if the blocking neighbors arn't solid, and the nessisary neighbors are loaded, then we good to go.
@@ -66,9 +76,14 @@ namespace Evix.Terrain.Resolution {
     /// <param name="chunkID"></param>
     /// <returns></returns>
     internal override bool validateChunk(Chunk.ID chunkID, out Chunk chunk) {
+      if (chunkID == new Chunk.ID(502, 10, 496)) {
+        World.Debugger.log($"log");
+      }
       if (base.validateChunk(chunkID, out chunk) && chunk != null) {
-        // we don't want the chunk to be loaded and empty, or loaded and solid with it's blocking neighbors also solid
-        return !(chunk.isLoaded && (chunk.isEmpty || (chunk.isSolid && MarchingTetsMeshGenerator.AllBlockingNeighborsAreSolid(chunkID, level))));
+        // we don't want the chunk to be loaded and empty, or loaded and solid with it's blocking neighbors also solid, but we do want empty loaded chunks if their neighbors need them to render
+        return !(chunk.isLoaded 
+          && ((chunk.isEmpty && !MarchingTetsMeshGenerator.IsANessisaryChunkNeighbor(chunkID, level)) 
+            || (chunk.isSolid && MarchingTetsMeshGenerator.AllBlockingNeighborsAreSolid(chunkID, level))));
       }
 
       return true;
@@ -141,6 +156,55 @@ namespace Evix.Terrain.Resolution {
       public ChunkMeshLoadingFinishedEvent(VoxelMeshData chunkMeshData) {
         this.chunkMeshData = chunkMeshData;
         name = $"Chunk mesh finished generating for {chunkMeshData.chunkID.Coordinate}";
+      }
+    }
+
+    /// <summary>
+    /// A job for notifying the main thread to de mesh the controller for this chunk
+    /// </summary>
+    public struct DemeshChunkObjectJob : IJob {
+      /// <summary>
+      /// The chunk id we're updating to active
+      /// </summary>
+      Chunk.ID chunkID;
+
+      public DemeshChunkObjectJob(Chunk.ID chunkID) {
+        this.chunkID = chunkID;
+      }
+
+      /// <summary>
+      /// notify the chunk activaton channel that we want this chunk active
+      /// </summary>
+      public void Execute() {
+        World.EventSystem.notifyChannelOf(
+          new RemoveChunkMeshEvent(chunkID),
+          EventSystems.WorldEventSystem.Channels.ChunkActivationUpdates
+        );
+      }
+    }
+
+    /// <summary>
+    /// An event to notify the level controller to set a chunk inactive
+    /// </summary>
+    public struct RemoveChunkMeshEvent : IEvent {
+
+      /// <summary>
+      /// The name of the event
+      /// </summary>
+      public string name {
+        get;
+      }
+
+      /// <summary>
+      /// The chunk id to set active
+      /// </summary>
+      public Chunk.ID chunkID {
+        get;
+      }
+
+      public RemoveChunkMeshEvent(Chunk.ID chunkID) {
+        this.chunkID = chunkID;
+        name = $"Setting chunk active: {chunkID.Coordinate}";
       }
     }
   }

@@ -16,7 +16,8 @@ namespace Evix.Controllers {
     /// <summary>
     /// The Manager for the active level.
     /// </summary>
-    [HideInInspector] public LevelManager levelManager;
+    [HideInInspector]
+    public LevelManager levelManager;
 
     /// <summary>
     /// The current chunk location of the chunk this gameobject is representing.
@@ -27,12 +28,14 @@ namespace Evix.Controllers {
     /// <summary>
     /// If this controller is being used.
     /// </summary>
-    [HideInInspector] public bool isActive = false;
+    [ReadOnly] 
+    public bool isActive = false;
 
     /// <summary>
     /// If this chunk has been meshed with chunk data.
     /// </summary>
-    [HideInInspector] public bool isMeshed = false;
+    [ReadOnly]
+    public bool isMeshed = false;
 
     /// <summary>
     /// The current mesh to use for this chunk.

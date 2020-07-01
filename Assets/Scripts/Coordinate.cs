@@ -1020,4 +1020,24 @@ namespace Evix {
       return Box(number, 0, 1);
     }
   }
+
+  public static class CoordinateCollectionExtentions {
+
+    /// <summary>
+    /// Get all points in one set of bounds but not the other
+    /// </summary>
+    /// <param name="boundsA">2 coordinates dictating a rectangular set of bounds (A)</param>
+    /// <param name="boundsToExclude">2 coordinates dictating a rectangular set of bounds (B)</param>
+    /// <returns> All of the points that are in A but not B </returns>
+    public static void forEachPointNotWithin(this Coordinate[] bounds, Coordinate[] boundsToExclude, Action<Coordinate> action) {
+      List<Coordinate> diffPoints = new List<Coordinate>();
+      // For all points within bounds set A
+      bounds[0].until(bounds[1], coordinate => {
+        // check if that point is in bounds set B
+        if (!coordinate.isWithin(boundsToExclude)) {
+          action(coordinate);
+        }
+      });
+    }
+  }
 }

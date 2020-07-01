@@ -75,20 +75,20 @@ namespace Evix.Managers {
     /// <summary>
     /// The priority weighted job queue for all apeture jobs being managed by this level
     /// </summary>
-    readonly ConcurrentPriorityQueue<ApertureWorkQueuePriority, Chunk.ID> apertureJobQueue
-      = new ConcurrentPriorityQueue<ApertureWorkQueuePriority, Chunk.ID>();
+    readonly ConcurrentPriorityQueue<ApertureWorkQueuePriority, ChunkResolutionAperture.ApetureChunkAdjustment> apertureJobQueue
+      = new ConcurrentPriorityQueue<ApertureWorkQueuePriority, ChunkResolutionAperture.ApetureChunkAdjustment>();
 
     /// <summary>
     /// The jobs running currently for the appeture. These handles let us see when they finish
     /// </summary>
-    readonly ConcurrentDictionary<Chunk.ID, ChunkResolutionAperture> chunksWithApertureJobsReadyToRun
-      = new ConcurrentDictionary<Chunk.ID, ChunkResolutionAperture>();
+    readonly ConcurrentDictionary<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture> adjustmentJobsReadyToRun
+      = new ConcurrentDictionary<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture>();
 
     /// <summary>
     /// The jobs running currently for the appeture. These handles let us see when they finish
     /// </summary>
-    readonly ConcurrentDictionary<Chunk.ID, ChunkResolutionAperture.ApertureJobHandle> runningJobs
-      = new ConcurrentDictionary<Chunk.ID, ChunkResolutionAperture.ApertureJobHandle>();
+    readonly ConcurrentDictionary<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture.ApertureJobHandle> runningJobs
+      = new ConcurrentDictionary<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture.ApertureJobHandle>();
 
     /// <summary>
     /// The thread running for the apertureJobQueue
@@ -137,8 +137,8 @@ namespace Evix.Managers {
         /// add the focus initilization jobs to the queue for each apeture
         level.forEachFocus(focus => {
           level.forEachAperture(aperture => {
-            foreach (Chunk.ID chunkID in aperture.getChunkLocationsForFocusInitilization(focus)) {
-              apertureJobQueue.Enqueue(getCurrentPriorityForChunk(chunkID, aperture), chunkID);
+            foreach (ChunkResolutionAperture.ApetureChunkAdjustment chunkAdjustment in aperture.getAdjustmentsForFocusInitilization(focus)) {
+              apertureJobQueue.Enqueue(getCurrentPriorityForChunk(chunkAdjustment.chunkID, aperture), chunkAdjustment);
             }
           });
         });
@@ -175,9 +175,7 @@ namespace Evix.Managers {
           || !assignedController.checkColliderIsBaked() // colliders are baked
         ) {
           chunksToActivate.Enqueue(chunkToActivate);
-        }
-
-        assignedController.enableObjectVisible();
+        } else assignedController.enableObjectVisible();
       }
 
       /// try to assign newly mehsed chunks that are waiting on controllers, if we run out.
@@ -210,11 +208,11 @@ namespace Evix.Managers {
     /// Must be called from the main thread
     /// </summary>
     void runReadyJobs() {
-      foreach (KeyValuePair<Chunk.ID, ChunkResolutionAperture> chunkAndApetureForJob in chunksWithApertureJobsReadyToRun) {
-        ChunkResolutionAperture.ApertureJobHandle jobHandle = chunkAndApetureForJob.Value.getJobFor(chunkAndApetureForJob.Key);
+      foreach (KeyValuePair<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture> chunkAndApetureForJob in adjustmentJobsReadyToRun) {
+        ChunkResolutionAperture.ApertureJobHandle jobHandle = chunkAndApetureForJob.Value.getJobFor(chunkAndApetureForJob.Key.chunkID, chunkAndApetureForJob.Key.type);
         jobHandle.schedule();
         runningJobs.TryAdd(chunkAndApetureForJob.Key, jobHandle);
-        chunksWithApertureJobsReadyToRun.TryRemove(chunkAndApetureForJob.Key, out _);
+        adjustmentJobsReadyToRun.TryRemove(chunkAndApetureForJob.Key, out _);
       }
     }
 
@@ -223,10 +221,10 @@ namespace Evix.Managers {
     /// only can be called from the main thread
     /// </summary>
     void checkForFinishedJobs() {
-      foreach (KeyValuePair<Chunk.ID, ChunkResolutionAperture.ApertureJobHandle> jobHandle in runningJobs) {
+      foreach (KeyValuePair<ChunkResolutionAperture.ApetureChunkAdjustment, ChunkResolutionAperture.ApertureJobHandle> jobHandle in runningJobs) {
         if (jobHandle.Value.jobIsComplete) {
           runningJobs.TryRemove(jobHandle.Key, out _);
-          jobHandle.Value.aperture.onJobComplete(jobHandle.Key,  jobHandle.Value);
+          jobHandle.Value.aperture.onJobComplete(jobHandle.Key.chunkID,  jobHandle.Value);
         }
       }
     }
@@ -314,8 +312,8 @@ namespace Evix.Managers {
           if (focus.currentChunk != focus.previousChunk) {
             /// Step 2: get all the aperture jobs for the focus changes into the queue.
             level.forEachAperture(aperture => {
-              foreach (Chunk.ID chunkID in aperture.getChunkLocationsForFocusAdjustment(focus)) {
-                apertureJobQueue.Enqueue(getCurrentPriorityForChunk(chunkID, aperture), chunkID);
+              foreach (ChunkResolutionAperture.ApetureChunkAdjustment adjustment in aperture.getAdjustmentsForFocusLocationChange(focus)) {
+                apertureJobQueue.Enqueue(getCurrentPriorityForChunk(adjustment.chunkID, aperture, adjustment.type), adjustment);
               }
             });
 
@@ -325,7 +323,7 @@ namespace Evix.Managers {
         });
 
         /// Step 3: Iterate over the next item in the queue and try to schedule a job for it
-        if (apertureJobQueue.TryDequeue(out KeyValuePair<ApertureWorkQueuePriority, Chunk.ID> queueItemWithPriority)) {
+        if (apertureJobQueue.TryDequeue(out KeyValuePair<ApertureWorkQueuePriority, ChunkResolutionAperture.ApetureChunkAdjustment> queueItemWithPriority)) {
           // if the item was cancled or is invalid, skip it.
           ChunkResolutionAperture apertureForQueueItem = level.getApetureByPriority(queueItemWithPriority.Key.aperturePriority);
           if (!isAValidQueueItem(queueItemWithPriority.Value, apertureForQueueItem)) {
@@ -334,16 +332,16 @@ namespace Evix.Managers {
 
           // if the item is ready, offer it up to the running jobs to pick up.
           // we'll try to add it to the running jobs list
-          if (itemIsReady(queueItemWithPriority.Value, apertureForQueueItem)
+          if (itemIsReady(queueItemWithPriority.Value.chunkID, apertureForQueueItem)
             && !runningJobs.ContainsKey(queueItemWithPriority.Value)
           ) {
-            chunksWithApertureJobsReadyToRun.TryAdd(queueItemWithPriority.Value, apertureForQueueItem);
-            World.Debugger.log($"Apeture Job type {apertureForQueueItem.GetType()} ready for {queueItemWithPriority.Value}");
+            adjustmentJobsReadyToRun.TryAdd(queueItemWithPriority.Value, apertureForQueueItem);
+            World.Debugger.log($"Apeture Job type {apertureForQueueItem.GetType()} ready for {queueItemWithPriority.Value.chunkID}");
             // if it's not ready, or there's a conflict requeue
             // if there's a conflict, it means a job is already running on this chunk and we should wait for that one to finish
           } else {
             apertureJobQueue.Enqueue(
-              getCurrentPriorityForChunk(queueItemWithPriority.Value, apertureForQueueItem),
+              getCurrentPriorityForChunk(queueItemWithPriority.Value.chunkID, apertureForQueueItem, queueItemWithPriority.Key.adjustmentType),
               queueItemWithPriority.Value
             );
           }
@@ -355,8 +353,8 @@ namespace Evix.Managers {
     /// validate queue items
     /// </summary>
     /// <returns></returns>
-    bool isAValidQueueItem(Chunk.ID chunkID, ChunkResolutionAperture aperture) {
-      return aperture.chunkIsValid(chunkID);
+    bool isAValidQueueItem(ChunkResolutionAperture.ApetureChunkAdjustment adjustment, ChunkResolutionAperture aperture) {
+      return aperture.chunkIsValid(adjustment);
     }
 
     /// <summary>
@@ -378,8 +376,16 @@ namespace Evix.Managers {
     /// <param name="chunkID"></param>
     /// <param name="aperture"></param>
     /// <returns></returns>
-    ApertureWorkQueuePriority getCurrentPriorityForChunk(Chunk.ID chunkID, ChunkResolutionAperture aperture) {
-      return new ApertureWorkQueuePriority(aperture.priority, (int)getDistanceToClosestFocus(chunkID, aperture.yWeightMultiplier));
+    ApertureWorkQueuePriority getCurrentPriorityForChunk(
+      Chunk.ID chunkID,
+      ChunkResolutionAperture aperture,
+      ChunkResolutionAperture.FocusAdjustmentType adjustmentType = ChunkResolutionAperture.FocusAdjustmentType.InFocus
+    ) {
+      return new ApertureWorkQueuePriority(
+        aperture.priority,
+        (int)getDistanceToClosestFocus(chunkID, aperture.yWeightMultiplier),
+        adjustmentType
+      );
     }
 
     /// <summary>
@@ -423,16 +429,14 @@ namespace Evix.Managers {
         case ActiveChunkObjectAperture.SetChunkActiveEvent scae:
           chunksToActivate.Enqueue(getDistanceToClosestFocus(scae.chunkID), scae.chunkID.Coordinate);
           break;
-        /*case ActivateGameobjectResolutionAperture.SetChunkObjectInactiveEvent scoie:
-          newlyDeactivatedChunks.Add(scoie.chunkLocation);
-          newlyDeactivatedChunksCount++;
+        case ActiveChunkObjectAperture.SetChunkInactiveEvent scie:
+          chunksToDeactivate.Enqueue(getDistanceToClosestFocus(scie.chunkID), scie.chunkID.Coordinate);
           break;
-        case LoadedChunkMeshDataResolutionAperture.ChunkMeshMovedOutOfFocusEvent smmoof:
-          if (tryToGetAssignedChunkController(smmoof.chunkLocation, out ChunkController assignedChunkController)) {
-            chunksWithOutOfFocusMeshes.Add(assignedChunkController);
-            outOfFocusMeshesCount++;
+        case MeshGenerationAperture.RemoveChunkMeshEvent rcme:
+          if (tryToGetAssignedChunkController(rcme.chunkID.Coordinate, out ChunkController assignedChunkController)) {
+            chunksToDeMesh.Enqueue(getDistanceToClosestFocus(rcme.chunkID), assignedChunkController);
           }
-          break;*/
+          break;
         default:
           return;
       }
@@ -446,9 +450,7 @@ namespace Evix.Managers {
       /// <summary>
       /// The priority of the apeture for this job in this level
       /// </summary>
-      public Level.AperturePriority aperturePriority {
-        get;
-      }
+      public readonly Level.AperturePriority aperturePriority;
 
       /// <summary>
       /// The distance to the closest level focus
@@ -456,13 +458,23 @@ namespace Evix.Managers {
       readonly int distanceToClosestFocus;
 
       /// <summary>
+      /// The type of adjustment the apeture if preforming
+      /// </summary>
+      public readonly ChunkResolutionAperture.FocusAdjustmentType adjustmentType;
+
+      /// <summary>
       /// Create a new apeture work queue priority key object
       /// </summary>
       /// <param name="aperturePriority"></param>
       /// <param name="distanceToClosestFocus"></param>
-      internal ApertureWorkQueuePriority(Level.AperturePriority aperturePriority, int distanceToClosestFocus) {
+      internal ApertureWorkQueuePriority(
+        Level.AperturePriority aperturePriority,
+        int distanceToClosestFocus,
+        ChunkResolutionAperture.FocusAdjustmentType adjustmentType = ChunkResolutionAperture.FocusAdjustmentType.InFocus
+      ) {
         this.aperturePriority = aperturePriority;
         this.distanceToClosestFocus = distanceToClosestFocus;
+        this.adjustmentType = adjustmentType;
       }
 
       /// <summary>
@@ -474,9 +486,17 @@ namespace Evix.Managers {
         // get priority by adding the distance a an int, to the apeture type * 3 (for load buffer)
         int thisPriorityValue = distanceToClosestFocus + (int)aperturePriority * 3;
         int otherPriorityValue = other.distanceToClosestFocus + (int)other.aperturePriority * 3;
+        // @todo:: test this, not sure if flipping the comparison if either is out of focus will always work
+        if (other.adjustmentType == ChunkResolutionAperture.FocusAdjustmentType.OutOfFocus || adjustmentType == ChunkResolutionAperture.FocusAdjustmentType.OutOfFocus) {
+          return otherPriorityValue.CompareTo(thisPriorityValue);
+        }
         return thisPriorityValue.CompareTo(otherPriorityValue);
       }
 
+      /// <summary>
+      /// string override
+      /// </summary>
+      /// <returns></returns>
       public override string ToString() {
         return $"${aperturePriority}@{distanceToClosestFocus}";
       }
